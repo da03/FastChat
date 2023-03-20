@@ -9,7 +9,7 @@ import threading
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
 import requests
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoModelForCausalLM, AutoModel
 import torch
 import uvicorn
 
@@ -53,12 +53,13 @@ def load_model(model_name, num_gpus):
            hf_model_name + "tokenizer/")
         model = AutoModelForCausalLM.from_pretrained(
            hf_model_name + "llama-7b/", torch_dtype=torch.float16, **kwargs)
+    elif model_name == "THUDM/chatglm-6b":
+        tokenizer = AutoTokenizer.from_pretrained("THUDM/chatglm-6b", trust_remote_code=True)
+        model = AutoModel.from_pretrained("THUDM/chatglm-6b", trust_remote_code=True).half()
     else:
-        hf_model_name = model_name
-
-        tokenizer = AutoTokenizer.from_pretrained(hf_model_name)
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
         model = AutoModelForCausalLM.from_pretrained(
-           hf_model_name, torch_dtype=torch.float16, **kwargs)
+           model_name, torch_dtype=torch.float16, **kwargs)
 
     if num_gpus == 1:
         model.cuda()
