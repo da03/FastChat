@@ -72,7 +72,7 @@ class Conversation:
                 if message:
                     ret += role + ": " + message + seps[i % 2]
                 else:
-                    ret += role + ":"
+                    ret += role + ":" #TODO: Yuntian: should there be a space?
             return ret
         elif self.sep_style == SeparatorStyle.ADD_COLON_SPACE_SINGLE:
             ret = system_prompt + self.sep

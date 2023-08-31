@@ -47,6 +47,7 @@ class DataArguments:
         default=None, metadata={"help": "Path to the evaluation data."}
     )
     lazy_preprocess: bool = False
+    gpt_and_user: bool = False
 
 
 @dataclass
@@ -81,6 +82,7 @@ def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: st
 def preprocess(
     sources,
     tokenizer: transformers.PreTrainedTokenizer,
+    gpt_and_user,
 ) -> Dict:
     conv = get_conversation_template("vicuna")
     roles = {"human": conv.roles[0], "gpt": conv.roles[1]}
@@ -95,7 +97,7 @@ def preprocess(
         conv.messages = []
         for j, sentence in enumerate(source):
             role = roles[sentence["from"]]
-            assert role == conv.roles[j % 2], f"{i}"
+            assert role == conv.roles[j % 2], f"{i}, {j}, {sentence}, {source[0]}, {source[1]}, {source[2]}, {source[3]}"
             conv.append_message(role, sentence["value"])
         conversations.append(conv.get_prompt())
 
@@ -114,41 +116,70 @@ def preprocess(
     # Mask targets. Only compute loss on the assistant outputs.
     sep = conv.sep + conv.roles[1] + ": "
     for conversation, target in zip(conversations, targets):
+        #import pdb; pdb.set_trace()
         total_len = int(target.ne(tokenizer.pad_token_id).sum())
 
         turns = conversation.split(conv.sep2)
         cur_len = 1
-        target[:cur_len] = IGNORE_TOKEN_ID
-        for i, turn in enumerate(turns):
-            if turn == "":
-                break
-            turn_len = len(tokenizer(turn).input_ids)
+        if not gpt_and_user:
+            target[:cur_len] = IGNORE_TOKEN_ID
+            for i, turn in enumerate(turns):
+                if turn == "":
+                    break
+                #if i > 0:
+                #    assert target[cur_len-1].item() == 2
+                #    assert target[cur_len].item() == 11889
+                turn_len = len(tokenizer(turn).input_ids)
 
-            parts = turn.split(sep)
-            if len(parts) != 2:
-                break
-            parts[0] += sep
-            # "-2" is hardcoded for the LLaMA tokenizer to make the offset correct.
-            instruction_len = len(tokenizer(parts[0]).input_ids) - 2
+                parts = turn.split(sep)
+                # "-2" is hardcoded for the LLaMA tokenizer to make the offset correct.
+                if i == 0:
+                    offset = 2
+                else:
+                    offset = 3
+                    turn_len -= 1
+                if len(parts) != 2:
+                    turn_len -= 1
+                    instruction_len = turn_len
+                    #if cur_len +instruction_len < target.shape[0]:
+                    #    assert target[cur_len +instruction_len].item() == 0, (tokenizer.decode(target[cur_len: cur_len +instruction_len+1]), turn)
+                    #if cur_len +instruction_len-1 < target.shape[0]:
+                    #    assert target[cur_len +instruction_len-1].item() != 0
+                    if not gpt_and_user:
+                        target[cur_len : cur_len + instruction_len] = IGNORE_TOKEN_ID
+                    cur_len += turn_len
+                    break
+                parts[0] += sep
+                instruction_len = len(tokenizer(parts[0]).input_ids) - offset
 
-            # Ignore the user instructions
-            target[cur_len : cur_len + instruction_len] = IGNORE_TOKEN_ID
-            cur_len += turn_len
+                # Ignore the user instructions
+                #assert target[cur_len +instruction_len-1].item() == 2
+                if not gpt_and_user:
+                    target[cur_len : cur_len + instruction_len] = IGNORE_TOKEN_ID
+                cur_len += turn_len
+                if cur_len >= target.shape[0]:
+                    #print ('WARNING:')
+                    break
 
-        target[cur_len:] = IGNORE_TOKEN_ID
+            target[cur_len:] = IGNORE_TOKEN_ID
+        if gpt_and_user:
+            target[target.eq(0)] = IGNORE_TOKEN_ID
 
         if False:  # Inspect and check the correctness of masking
+        #if True:  # Inspect and check the correctness of masking
             z = target.clone()
             z = torch.where(z == IGNORE_TOKEN_ID, tokenizer.unk_token_id, z)
             rank0_print(tokenizer.decode(z))
 
-        if cur_len < tokenizer.model_max_length:
+        if cur_len < tokenizer.model_max_length and (not gpt_and_user):
             if cur_len != total_len:
                 target[:] = IGNORE_TOKEN_ID
                 rank0_print(
                     f"WARNING: tokenization mismatch: {cur_len} vs. {total_len}."
                     f" (ignored)"
                 )
+                #assert False
+
 
     return dict(
         input_ids=input_ids,
@@ -185,9 +216,10 @@ class SupervisedDataset(Dataset):
 class LazySupervisedDataset(Dataset):
     """Dataset for supervised fine-tuning."""
 
-    def __init__(self, raw_data, tokenizer: transformers.PreTrainedTokenizer):
+    def __init__(self, raw_data, tokenizer: transformers.PreTrainedTokenizer, gpt_and_user):
         super(LazySupervisedDataset, self).__init__()
         self.tokenizer = tokenizer
+        self.gpt_and_user = gpt_and_user
 
         rank0_print("Formatting inputs...Skip in lazy mode")
         self.tokenizer = tokenizer
@@ -201,7 +233,7 @@ class LazySupervisedDataset(Dataset):
         if i in self.cached_data_dict:
             return self.cached_data_dict[i]
 
-        ret = preprocess([self.raw_data[i]["conversations"]], self.tokenizer)
+        ret = preprocess([self.raw_data[i]["conversations"]], self.tokenizer, self.gpt_and_user)
         ret = dict(
             input_ids=ret["input_ids"][0],
             labels=ret["labels"][0],
@@ -222,9 +254,10 @@ def make_supervised_data_module(
     rank0_print("Loading data...")
 
     train_json = json.load(open(data_args.data_path, "r"))
-    train_dataset = dataset_cls(train_json, tokenizer=tokenizer)
+    train_dataset = dataset_cls(train_json, tokenizer=tokenizer, gpt_and_user=data_args.gpt_and_user)
 
     if data_args.eval_data_path:
+        assert False
         eval_json = json.load(open(data_args.eval_data_path, "r"))
         eval_dataset = dataset_cls(eval_json, tokenizer=tokenizer)
     else:
