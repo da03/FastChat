@@ -557,6 +557,30 @@ class VicunaAdapter(BaseModelAdapter):
             )
 
 
+class NaturalDialoguesAdapter(BaseModelAdapter):
+    """Model adapater for natural dialogues models"""
+
+    use_fast_tokenizer = False
+
+    def match(self, model_path: str):
+        return "user" in model_path.lower()
+
+    def load_model(self, model_path: str, from_pretrained_kwargs: dict):
+        revision = from_pretrained_kwargs.get("revision", "main")
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_path, use_fast=self.use_fast_tokenizer, revision=revision
+        )
+        model = AutoModelForCausalLM.from_pretrained(
+            model_path,
+            low_cpu_mem_usage=True,
+            **from_pretrained_kwargs,
+        )
+        return model, tokenizer
+
+    def get_default_conv_template(self, model_path: str) -> Conversation:
+        return get_conv_template("natural_dialogues_v0")
+
+
 class AiroborosAdapter(BaseModelAdapter):
     """The model adapter for jondurbin/airoboros-*"""
 
@@ -1635,6 +1659,7 @@ register_model_adapter(VigogneChatAdapter)
 register_model_adapter(OpenLLaMaOpenInstructAdapter)
 register_model_adapter(ReaLMAdapter)
 register_model_adapter(CodeLlamaAdapter)
+register_model_adapter(NaturalDialoguesAdapter)
 
 # After all adapters, try the default base adapter.
 register_model_adapter(BaseModelAdapter)

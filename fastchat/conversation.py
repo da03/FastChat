@@ -27,6 +27,7 @@ class SeparatorStyle(IntEnum):
     RWKV = auto()
     PHOENIX = auto()
     ROBIN = auto()
+    ND = auto()
 
 
 @dataclasses.dataclass
@@ -200,6 +201,15 @@ class Conversation:
                 else:
                     ret += role + ":\n"
             return ret
+        elif self.sep_style == SeparatorStyle.ND:
+            seps = [self.sep, self.sep2]
+            ret = system_prompt + " "
+            for i, (role, message) in enumerate(self.messages):
+                if message:
+                    ret += role + ": " + message + seps[i % 2]
+                else:
+                    ret += role + ":"
+            return ret
         else:
             raise ValueError(f"Invalid style: {self.sep_style}")
 
@@ -340,6 +350,19 @@ register_conv_template(
         roles=("USER", "ASSISTANT"),
         sep_style=SeparatorStyle.ADD_COLON_TWO,
         sep=" ",
+        sep2="</s>",
+    )
+)
+
+# natural dialogues template
+register_conv_template(
+    Conversation(
+        name="natural_dialogues_v0",
+        system_message="A chat between a curious user and an artificial intelligence assistant."
+        "The assistant gives helpful, detailed, and polite answers to the user's questions.",
+        roles=("USER", "ASSISTANT"),
+        sep_style=SeparatorStyle.ND,
+        sep="</s> ",
         sep2="</s>",
     )
 )
