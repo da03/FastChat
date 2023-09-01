@@ -563,7 +563,8 @@ class NaturalDialoguesAdapter(BaseModelAdapter):
     use_fast_tokenizer = False
 
     def match(self, model_path: str):
-        return "user" in model_path.lower()
+        self.model_path = model_path
+        return "natural-dialogues" in model_path.lower()
 
     def load_model(self, model_path: str, from_pretrained_kwargs: dict):
         revision = from_pretrained_kwargs.get("revision", "main")
@@ -578,7 +579,10 @@ class NaturalDialoguesAdapter(BaseModelAdapter):
         return model, tokenizer
 
     def get_default_conv_template(self, model_path: str) -> Conversation:
-        return get_conv_template("natural_dialogues_v0")
+        if "user-assistant" in self.model_path:
+            return get_conv_template("natural_dialogues_v0")
+        else:
+            return get_conv_template("vicuna_v1.1")
 
 
 class AiroborosAdapter(BaseModelAdapter):
